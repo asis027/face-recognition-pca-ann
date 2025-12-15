@@ -1,0 +1,64 @@
+# Face Recognition Configuration File
+
+# Dataset Configuration
+dataset:
+  root_dir: "./dataset"
+  image_size: 64  # Image will be resized to (image_size x image_size)
+  grayscale: true
+  test_split: 0.2  # Fraction of data for testing
+  random_state: 42
+
+# PCA Configuration
+pca:
+  n_components: 50  # Number of eigenfaces
+  variance_threshold: null  # Optional: e.g., 0.95 for 95% variance
+  
+# Classifier Configuration
+classifier:
+  type: "mlp"  # Options: mlp, svm, knn
+  
+  # MLP specific parameters
+  mlp:
+    hidden_layers: [128, 64]
+    max_iter: 500
+    early_stopping: true
+    validation_fraction: 0.1
+    
+  # SVM specific parameters
+  svm:
+    kernel: "rbf"
+    C: 1.0
+    
+  # KNN specific parameters
+  knn:
+    n_neighbors: 5
+    metric: "euclidean"
+
+# Prediction Configuration
+prediction:
+  confidence_threshold: 0.5  # Threshold for unknown person detection
+  detect_face: false  # Enable face detection preprocessing
+  
+# Training Configuration
+training:
+  output_dir: "./model_output"
+  save_metrics: true
+  save_visualizations: true
+  
+# Evaluation Configuration
+evaluation:
+  output_dir: "./evaluation_results"
+  generate_plots: true
+  
+# Visualization Configuration
+visualization:
+  output_dir: "./visualizations"
+  n_eigenfaces_display: 16
+  reconstruction_k_values: [5, 10, 20, 50]
+  save_figures: true
+  dpi: 300
+
+# Logging Configuration
+logging:
+  level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
