@@ -1,0 +1,334 @@
+"""
+Face Recognition using PCA and ANN
+Complete implementation with all error handling
+"""
+
+import os
+import numpy as np
+import cv2
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
+from sklearn.neural_network import MLPClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import seaborn as sns
+
+class FaceRecognition:
+    def __init__(self, dataset_path='dataset'):
+        self.dataset_path = dataset_path
+        self.pca = None
+        self.mlp = None
+        self.scaler = None
+        self.label_encoder = None
+        self.image_shape = None
+        
+    def load_dataset(self):
+        """Load face images from dataset folder"""
+        print("Loading dataset...")
+        images = []
+        labels = []
+        
+        if not os.path.exists(self.dataset_path):
+            raise FileNotFoundError(f"Dataset path '{self.dataset_path}' not found!")
+        
+        # Get all person folders
+        person_folders = sorted([f for f in os.listdir(self.dataset_path) 
+                                if os.path.isdir(os.path.join(self.dataset_path, f))])
+        
+        if len(person_folders) == 0:
+            raise ValueError(f"No folders found in {self.dataset_path}")
+        
+        print(f"Found {len(person_folders)} person folders")
+        
+        for person_id in person_folders:
+            person_path = os.path.join(self.dataset_path, person_id)
+            
+            # Get all images for this person
+            image_files = [f for f in os.listdir(person_path) 
+                          if f.endswith(('.pgm', '.jpg', '.png', '.jpeg'))]
+            
+            for image_file in image_files:
+                image_path = os.path.join(person_path, image_file)
+                
+                # Read image in grayscale
+                img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+                
+                if img is None:
+                    print(f"Warning: Could not read {image_path}")
+                    continue
+                
+                images.append(img)
+                # Extract label from folder name (e.g., 's1' -> 1)
+                label = int(person_id.replace('s', '').replace('person', ''))
+                labels.append(label)
+        
+        if len(images) == 0:
+            raise ValueError("No images loaded! Check dataset path and format.")
+        
+        print(f"Loaded {len(images)} images from {len(set(labels))} persons")
+        
+        # Store image shape for later reconstruction
+        self.image_shape = images[0].shape
+        
+        return np.array(images), np.array(labels)
+    
+    def preprocess_images(self, images):
+        """Flatten and normalize images"""
+        print("Preprocessing images...")
+        
+        # Ensure all images are same size
+        target_size = self.image_shape
+        processed = []
+        
+        for img in images:
+            # Resize if needed
+            if img.shape != target_size:
+                img = cv2.resize(img, (target_size[1], target_size[0]))
+            
+            # Flatten to 1D vector
+            img_vector = img.flatten()
+            processed.append(img_vector)
+        
+        # Convert to numpy array
+        X = np.array(processed, dtype=np.float32)
+        
+        # Normalize pixel values to [0, 1]
+        X = X / 255.0
+        
+        print(f"Preprocessed shape: {X.shape}")
+        return X
+    
+    def apply_pca(self, X_train, X_test, n_components=100):
+        """Apply PCA for dimensionality reduction"""
+        print(f"\nApplying PCA with {n_components} components...")
+        
+        # Check maximum possible components
+        max_components = min(X_train.shape[0], X_train.shape[1]) - 1
+        n_components = min(n_components, max_components)
+        
+        print(f"Using {n_components} components (max possible: {max_components})")
+        
+        # Standardize data
+        self.scaler = StandardScaler()
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
+        
+        # Apply PCA
+        self.pca = PCA(n_components=n_components, whiten=True, random_state=42)
+        X_train_pca = self.pca.fit_transform(X_train_scaled)
+        X_test_pca = self.pca.transform(X_test_scaled)
+        
+        # Print explained variance
+        explained_var = sum(self.pca.explained_variance_ratio_)
+        print(f"Explained variance: {explained_var:.2%}")
+        
+        return X_train_pca, X_test_pca
+    
+    def train_ann(self, X_train, y_train, hidden_layers=(100, 50)):
+        """Train Artificial Neural Network"""
+        print(f"\nTraining ANN with layers: {hidden_layers}...")
+        
+        # Encode labels
+        self.label_encoder = LabelEncoder()
+        y_train_encoded = self.label_encoder.fit_transform(y_train)
+        
+        # Create and train MLP
+        self.mlp = MLPClassifier(
+            hidden_layer_sizes=hidden_layers,
+            activation='relu',
+            solver='adam',
+            learning_rate_init=0.001,
+            max_iter=500,
+            random_state=42,
+            verbose=False,
+            early_stopping=True,
+            validation_fraction=0.1
+        )
+        
+        self.mlp.fit(X_train, y_train_encoded)
+        
+        print("Training completed!")
+        print(f"Number of iterations: {self.mlp.n_iter_}")
+        
+    def evaluate(self, X_test, y_test):
+        """Evaluate model performance"""
+        print("\nEvaluating model...")
+        
+        # Encode labels
+        y_test_encoded = self.label_encoder.transform(y_test)
+        
+        # Predict
+        y_pred = self.mlp.predict(X_test)
+        
+        # Calculate accuracy
+        accuracy = accuracy_score(y_test_encoded, y_pred)
+        print(f"\n{'='*50}")
+        print(f"Test Accuracy: {accuracy:.2%}")
+        print(f"{'='*50}\n")
+        
+        # Classification report
+        print("Classification Report:")
+        print(classification_report(y_test_encoded, y_pred))
+        
+        return accuracy, y_pred
+    
+    def plot_results(self, X_test, y_test, y_pred, n_samples=10):
+        """Visualize predictions"""
+        print("\nGenerating visualizations...")
+        
+        # Plot sample predictions
+        fig, axes = plt.subplots(2, 5, figsize=(15, 6))
+        fig.suptitle('Sample Predictions', fontsize=16)
+        
+        for i, ax in enumerate(axes.flat):
+            if i < min(n_samples, len(X_test)):
+                # Reconstruct image from PCA
+                img_scaled = self.scaler.inverse_transform(
+                    self.pca.inverse_transform(X_test[i].reshape(1, -1))
+                )
+                img = (img_scaled.reshape(self.image_shape) * 255).astype(np.uint8)
+                
+                # Get actual and predicted labels
+                actual = self.label_encoder.inverse_transform([y_test[i]])[0]
+                predicted = self.label_encoder.inverse_transform([y_pred[i]])[0]
+                
+                # Plot
+                ax.imshow(img, cmap='gray')
+                color = 'green' if actual == predicted else 'red'
+                ax.set_title(f'True: {actual}\nPred: {predicted}', color=color)
+                ax.axis('off')
+        
+        plt.tight_layout()
+        plt.savefig('predictions.png', dpi=150, bbox_inches='tight')
+        print("Saved predictions to 'predictions.png'")
+        plt.show()
+    
+    def plot_eigenfaces(self, n_eigenfaces=10):
+        """Visualize eigenfaces"""
+        if self.pca is None:
+            print("PCA not fitted yet!")
+            return
+        
+        print("\nPlotting eigenfaces...")
+        
+        fig, axes = plt.subplots(2, 5, figsize=(15, 6))
+        fig.suptitle('Top 10 Eigenfaces', fontsize=16)
+        
+        for i, ax in enumerate(axes.flat):
+            if i < min(n_eigenfaces, len(self.pca.components_)):
+                eigenface = self.pca.components_[i].reshape(self.image_shape)
+                # Normalize for visualization
+                eigenface = (eigenface - eigenface.min()) / (eigenface.max() - eigenface.min())
+                
+                ax.imshow(eigenface, cmap='gray')
+                ax.set_title(f'Eigenface {i+1}')
+                ax.axis('off')
+        
+        plt.tight_layout()
+        plt.savefig('eigenfaces.png', dpi=150, bbox_inches='tight')
+        print("Saved eigenfaces to 'eigenfaces.png'")
+        plt.show()
+    
+    def plot_mean_face(self):
+        """Visualize mean face"""
+        if self.pca is None:
+            print("PCA not fitted yet!")
+            return
+        
+        print("\nPlotting mean face...")
+        
+        mean_face = self.pca.mean_.reshape(self.image_shape)
+        mean_face = (mean_face - mean_face.min()) / (mean_face.max() - mean_face.min())
+        
+        plt.figure(figsize=(6, 8))
+        plt.imshow(mean_face, cmap='gray')
+        plt.title('Mean Face (Average of all training faces)', fontsize=14)
+        plt.axis('off')
+        plt.tight_layout()
+        plt.savefig('mean_face.png', dpi=150, bbox_inches='tight')
+        print("Saved mean face to 'mean_face.png'")
+        plt.show()
+    
+    def run_complete_pipeline(self, n_components=100, hidden_layers=(100, 50), 
+                             test_size=0.2, visualize=True):
+        """Run complete face recognition pipeline"""
+        print("="*60)
+        print("FACE RECOGNITION USING PCA AND ANN")
+        print("="*60)
+        
+        try:
+            # Load dataset
+            images, labels = self.load_dataset()
+            
+            # Preprocess
+            X = self.preprocess_images(images)
+            
+            # Split data
+            print(f"\nSplitting data: {int((1-test_size)*100)}% train, {int(test_size*100)}% test")
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, labels, 
+                test_size=test_size, 
+                random_state=42,
+                stratify=labels
+            )
+            
+            print(f"Training samples: {len(X_train)}")
+            print(f"Test samples: {len(X_test)}")
+            
+            # Apply PCA
+            X_train_pca, X_test_pca = self.apply_pca(X_train, X_test, n_components)
+            
+            # Train ANN
+            self.train_ann(X_train_pca, y_train, hidden_layers)
+            
+            # Evaluate
+            accuracy, y_pred = self.evaluate(X_test_pca, y_test)
+            
+            # Visualize
+            if visualize:
+                self.plot_mean_face()
+                self.plot_eigenfaces()
+                self.plot_results(X_test_pca, y_test, y_pred)
+            
+            print("\n" + "="*60)
+            print("Pipeline completed successfully!")
+            print("="*60)
+            
+            return accuracy
+            
+        except Exception as e:
+            print(f"\n❌ ERROR: {str(e)}")
+            print("\nTroubleshooting tips:")
+            print("1. Make sure dataset folder exists and contains images")
+            print("2. Check image format (should be .pgm, .jpg, or .png)")
+            print("3. Ensure dataset structure: dataset/s1/, dataset/s2/, etc.")
+            print("4. Install required packages: pip install -r requirements.txt")
+            raise
+
+
+# Main execution
+if __name__ == "__main__":
+    # Create face recognition object
+    fr = FaceRecognition(dataset_path='dataset')
+    
+    # Run complete pipeline
+    try:
+        accuracy = fr.run_complete_pipeline(
+            n_components=100,
+            hidden_layers=(100, 50),
+            test_size=0.2,
+            visualize=True
+        )
+        
+        print(f"\n✅ Final Accuracy: {accuracy:.2%}")
+        
+    except FileNotFoundError:
+        print("\n⚠️  Dataset not found!")
+        print("\nTo download the AT&T Face Database:")
+        print("1. Visit: https://www.cl.cam.ac.uk/research/dtg/attarchive/facedatabase.html")
+        print("2. Download att_faces.zip")
+        print("3. Extract to 'dataset/' folder")
+        print("\nOr run:")
+        print("wget https://www.cl.cam.ac.uk/Research/DTG/attarchive/pub/data/att_faces.zip")
+        print("unzip att_faces.zip -d dataset/")
