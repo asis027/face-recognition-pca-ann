@@ -1,0 +1,485 @@
+"""
+Face Recognition using PCA and ANN
+WINDOWS-OPTIMIZED VERSION
+Complete implementation with full error handling
+"""
+
+import os
+import sys
+import numpy as np
+import cv2
+import matplotlib
+matplotlib.use('TkAgg')  # Windows-compatible backend
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
+from sklearn.neural_network import MLPClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import warnings
+warnings.filterwarnings('ignore')
+
+class WindowsFaceRecognition:
+    """Windows-optimized Face Recognition using PCA and ANN"""
+    
+    def __init__(self, dataset_path='dataset'):
+        self.dataset_path = dataset_path
+        self.pca = None
+        self.mlp = None
+        self.scaler = None
+        self.label_encoder = None
+        self.image_shape = None
+        
+        # Windows path handling
+        self.dataset_path = os.path.normpath(dataset_path)
+        
+    def check_prerequisites(self):
+        """Check if all requirements are met"""
+        print("="*60)
+        print("CHECKING PREREQUISITES")
+        print("="*60)
+        
+        # Check Python version
+        py_version = sys.version_info
+        print(f"\n✓ Python Version: {py_version.major}.{py_version.minor}.{py_version.micro}")
+        if py_version.major < 3 or (py_version.major == 3 and py_version.minor < 7):
+            print("  ⚠ Warning: Python 3.7+ recommended")
+        
+        # Check required packages
+        required_packages = {
+            'numpy': 'numpy',
+            'sklearn': 'scikit-learn',
+            'cv2': 'opencv-python',
+            'matplotlib': 'matplotlib'
+        }
+        
+        print("\nChecking packages:")
+        all_installed = True
+        for import_name, pip_name in required_packages.items():
+            try:
+                if import_name == 'sklearn':
+                    import sklearn
+                    print(f"  ✓ {pip_name}: {sklearn.__version__}")
+                elif import_name == 'cv2':
+                    import cv2
+                    print(f"  ✓ {pip_name}: {cv2.__version__}")
+                else:
+                    mod = __import__(import_name)
+                    print(f"  ✓ {pip_name}: {mod.__version__}")
+            except ImportError:
+                print(f"  ✗ {pip_name}: NOT INSTALLED")
+                print(f"    Install with: pip install {pip_name}")
+                all_installed = False
+        
+        # Check dataset
+        print(f"\nChecking dataset at: {self.dataset_path}")
+        if not os.path.exists(self.dataset_path):
+            print(f"  ✗ Dataset folder not found!")
+            print(f"\n  📥 To download the AT&T Face Database:")
+            print(f"  1. Go to: https://www.cl.cam.ac.uk/research/dtg/attarchive/facedatabase.html")
+            print(f"  2. Download 'att_faces.zip'")
+            print(f"  3. Extract to '{self.dataset_path}' folder")
+            print(f"\n  Or run: python download_dataset.py")
+            return False
+        else:
+            folders = [f for f in os.listdir(self.dataset_path) 
+                      if os.path.isdir(os.path.join(self.dataset_path, f))]
+            if len(folders) == 0:
+                print(f"  ✗ No folders found in dataset!")
+                return False
+            else:
+                print(f"  ✓ Found {len(folders)} person folders")
+                # Check first folder
+                first_folder = os.path.join(self.dataset_path, folders[0])
+                images = [f for f in os.listdir(first_folder) 
+                         if f.endswith(('.pgm', '.jpg', '.png'))]
+                print(f"  ✓ {folders[0]} contains {len(images)} images")
+        
+        print("\n" + "="*60)
+        if all_installed:
+            print("✅ All prerequisites met!")
+        else:
+            print("❌ Please install missing packages")
+        print("="*60 + "\n")
+        
+        return all_installed
+        
+    def load_dataset(self):
+        """Load face images from dataset folder with Windows path handling"""
+        print("\n" + "="*60)
+        print("LOADING DATASET")
+        print("="*60)
+        
+        if not os.path.exists(self.dataset_path):
+            raise FileNotFoundError(
+                f"\n❌ Dataset folder not found: {self.dataset_path}\n"
+                f"Please download the AT&T Face Database and extract to this folder."
+            )
+        
+        images = []
+        labels = []
+        
+        # Get all person folders
+        person_folders = sorted([
+            f for f in os.listdir(self.dataset_path) 
+            if os.path.isdir(os.path.join(self.dataset_path, f))
+        ])
+        
+        if len(person_folders) == 0:
+            raise ValueError(f"No folders found in {self.dataset_path}")
+        
+        print(f"\nFound {len(person_folders)} person folders")
+        
+        # Load images
+        for person_id in person_folders:
+            person_path = os.path.join(self.dataset_path, person_id)
+            
+            # Get all images for this person
+            image_files = [
+                f for f in os.listdir(person_path) 
+                if f.endswith(('.pgm', '.jpg', '.png', '.jpeg'))
+            ]
+            
+            for image_file in image_files:
+                image_path = os.path.join(person_path, image_file)
+                
+                # Read image in grayscale
+                try:
+                    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+                    
+                    if img is None:
+                        print(f"⚠ Warning: Could not read {image_path}")
+                        continue
+                    
+                    images.append(img)
+                    # Extract label from folder name
+                    label = int(person_id.replace('s', '').replace('person', ''))
+                    labels.append(label)
+                    
+                except Exception as e:
+                    print(f"⚠ Error reading {image_path}: {e}")
+                    continue
+        
+        if len(images) == 0:
+            raise ValueError(
+                "No images loaded! Check:\n"
+                "1. Dataset path is correct\n"
+                "2. Images are in .pgm, .jpg, or .png format\n"
+                "3. Folder structure: dataset/s1/, dataset/s2/, etc."
+            )
+        
+        print(f"✓ Loaded {len(images)} images from {len(set(labels))} persons")
+        
+        # Store image shape
+        self.image_shape = images[0].shape
+        print(f"✓ Image size: {self.image_shape[0]}x{self.image_shape[1]}")
+        
+        return np.array(images), np.array(labels)
+    
+    def preprocess_images(self, images):
+        """Flatten and normalize images"""
+        print("\n" + "="*60)
+        print("PREPROCESSING")
+        print("="*60)
+        
+        target_size = self.image_shape
+        processed = []
+        
+        for i, img in enumerate(images):
+            try:
+                # Resize if needed
+                if img.shape != target_size:
+                    img = cv2.resize(img, (target_size[1], target_size[0]))
+                
+                # Flatten to 1D vector
+                img_vector = img.flatten()
+                processed.append(img_vector)
+                
+            except Exception as e:
+                print(f"⚠ Error processing image {i}: {e}")
+                continue
+        
+        # Convert to numpy array
+        X = np.array(processed, dtype=np.float32)
+        
+        # Normalize pixel values to [0, 1]
+        X = X / 255.0
+        
+        print(f"\n✓ Preprocessed {len(X)} images")
+        print(f"✓ Feature vector size: {X.shape[1]}")
+        
+        return X
+    
+    def apply_pca(self, X_train, X_test, n_components=100):
+        """Apply PCA for dimensionality reduction"""
+        print("\n" + "="*60)
+        print("APPLYING PCA")
+        print("="*60)
+        
+        # Check maximum possible components
+        max_components = min(X_train.shape[0], X_train.shape[1]) - 1
+        n_components = min(n_components, max_components)
+        
+        print(f"\nUsing {n_components} components (max: {max_components})")
+        
+        # Standardize data
+        self.scaler = StandardScaler()
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
+        
+        # Apply PCA
+        self.pca = PCA(n_components=n_components, whiten=True, random_state=42)
+        X_train_pca = self.pca.fit_transform(X_train_scaled)
+        X_test_pca = self.pca.transform(X_test_scaled)
+        
+        # Print explained variance
+        explained_var = sum(self.pca.explained_variance_ratio_)
+        print(f"✓ Explained variance: {explained_var:.2%}")
+        print(f"✓ Reduced from {X_train.shape[1]} to {n_components} dimensions")
+        
+        return X_train_pca, X_test_pca
+    
+    def train_ann(self, X_train, y_train, hidden_layers=(100, 50)):
+        """Train Artificial Neural Network"""
+        print("\n" + "="*60)
+        print("TRAINING NEURAL NETWORK")
+        print("="*60)
+        
+        # Encode labels
+        self.label_encoder = LabelEncoder()
+        y_train_encoded = self.label_encoder.fit_transform(y_train)
+        
+        print(f"\nNetwork architecture: {hidden_layers}")
+        print(f"Number of classes: {len(np.unique(y_train_encoded))}")
+        
+        # Create and train MLP
+        self.mlp = MLPClassifier(
+            hidden_layer_sizes=hidden_layers,
+            activation='relu',
+            solver='adam',
+            learning_rate_init=0.001,
+            max_iter=500,
+            random_state=42,
+            verbose=False,
+            early_stopping=True,
+            validation_fraction=0.1
+        )
+        
+        print("\nTraining...")
+        self.mlp.fit(X_train, y_train_encoded)
+        
+        print(f"✓ Training completed!")
+        print(f"✓ Iterations: {self.mlp.n_iter_}")
+        print(f"✓ Training loss: {self.mlp.loss_:.4f}")
+        
+    def evaluate(self, X_test, y_test):
+        """Evaluate model performance"""
+        print("\n" + "="*60)
+        print("EVALUATION")
+        print("="*60)
+        
+        # Encode labels
+        y_test_encoded = self.label_encoder.transform(y_test)
+        
+        # Predict
+        y_pred = self.mlp.predict(X_test)
+        
+        # Calculate accuracy
+        accuracy = accuracy_score(y_test_encoded, y_pred)
+        
+        print(f"\n{'='*60}")
+        print(f"🎯 TEST ACCURACY: {accuracy:.2%}")
+        print(f"{'='*60}\n")
+        
+        # Detailed report
+        print("Classification Report:")
+        print(classification_report(y_test_encoded, y_pred, zero_division=0))
+        
+        return accuracy, y_pred
+    
+    def visualize_results(self, X_test, y_test, y_pred):
+        """Visualize predictions"""
+        print("\n" + "="*60)
+        print("GENERATING VISUALIZATIONS")
+        print("="*60)
+        
+        try:
+            # Plot sample predictions
+            n_samples = min(10, len(X_test))
+            fig, axes = plt.subplots(2, 5, figsize=(15, 6))
+            fig.suptitle('Sample Predictions', fontsize=16, fontweight='bold')
+            
+            for i, ax in enumerate(axes.flat):
+                if i < n_samples:
+                    # Reconstruct image
+                    img_scaled = self.scaler.inverse_transform(
+                        self.pca.inverse_transform(X_test[i].reshape(1, -1))
+                    )
+                    img = (img_scaled.reshape(self.image_shape) * 255).astype(np.uint8)
+                    
+                    # Get labels
+                    actual = self.label_encoder.inverse_transform([y_test[i]])[0]
+                    predicted = self.label_encoder.inverse_transform([y_pred[i]])[0]
+                    
+                    # Plot
+                    ax.imshow(img, cmap='gray')
+                    color = 'green' if actual == predicted else 'red'
+                    ax.set_title(f'True: {actual}\nPred: {predicted}', 
+                               color=color, fontweight='bold')
+                    ax.axis('off')
+            
+            plt.tight_layout()
+            
+            # Save to file
+            output_path = os.path.join(os.getcwd(), 'predictions.png')
+            plt.savefig(output_path, dpi=150, bbox_inches='tight')
+            print(f"\n✓ Saved predictions to: {output_path}")
+            
+            plt.show()
+            
+        except Exception as e:
+            print(f"⚠ Could not generate visualizations: {e}")
+    
+    def plot_eigenfaces(self, n_eigenfaces=10):
+        """Visualize eigenfaces"""
+        if self.pca is None:
+            print("⚠ PCA not fitted yet!")
+            return
+        
+        print("\nGenerating eigenfaces...")
+        
+        try:
+            fig, axes = plt.subplots(2, 5, figsize=(15, 6))
+            fig.suptitle('Top 10 Eigenfaces', fontsize=16, fontweight='bold')
+            
+            for i, ax in enumerate(axes.flat):
+                if i < min(n_eigenfaces, len(self.pca.components_)):
+                    eigenface = self.pca.components_[i].reshape(self.image_shape)
+                    # Normalize
+                    eigenface = (eigenface - eigenface.min()) / (eigenface.max() - eigenface.min())
+                    
+                    ax.imshow(eigenface, cmap='gray')
+                    ax.set_title(f'Eigenface {i+1}', fontweight='bold')
+                    ax.axis('off')
+            
+            plt.tight_layout()
+            
+            # Save
+            output_path = os.path.join(os.getcwd(), 'eigenfaces.png')
+            plt.savefig(output_path, dpi=150, bbox_inches='tight')
+            print(f"✓ Saved eigenfaces to: {output_path}")
+            
+            plt.show()
+            
+        except Exception as e:
+            print(f"⚠ Could not plot eigenfaces: {e}")
+    
+    def run(self, n_components=100, hidden_layers=(100, 50), 
+            test_size=0.2, visualize=True):
+        """Run complete pipeline"""
+        
+        print("\n")
+        print("="*60)
+        print("FACE RECOGNITION USING PCA AND ANN")
+        print("Windows-Optimized Version")
+        print("="*60)
+        
+        try:
+            # Check prerequisites
+            if not self.check_prerequisites():
+                return None
+            
+            # Load dataset
+            images, labels = self.load_dataset()
+            
+            # Preprocess
+            X = self.preprocess_images(images)
+            
+            # Split data
+            print("\n" + "="*60)
+            print("SPLITTING DATA")
+            print("="*60)
+            print(f"\nTrain: {int((1-test_size)*100)}%, Test: {int(test_size*100)}%")
+            
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, labels, 
+                test_size=test_size, 
+                random_state=42,
+                stratify=labels
+            )
+            
+            print(f"✓ Training samples: {len(X_train)}")
+            print(f"✓ Test samples: {len(X_test)}")
+            
+            # Apply PCA
+            X_train_pca, X_test_pca = self.apply_pca(X_train, X_test, n_components)
+            
+            # Train ANN
+            self.train_ann(X_train_pca, y_train, hidden_layers)
+            
+            # Evaluate
+            accuracy, y_pred = self.evaluate(X_test_pca, y_test)
+            
+            # Visualize
+            if visualize:
+                self.plot_eigenfaces()
+                self.visualize_results(X_test_pca, y_test, y_pred)
+            
+            print("\n" + "="*60)
+            print("✅ PIPELINE COMPLETED SUCCESSFULLY!")
+            print("="*60)
+            print(f"\n🎯 Final Accuracy: {accuracy:.2%}\n")
+            
+            return accuracy
+            
+        except FileNotFoundError as e:
+            print(f"\n❌ ERROR: {e}")
+            print("\n💡 Download dataset from:")
+            print("   https://www.cl.cam.ac.uk/research/dtg/attarchive/facedatabase.html")
+            return None
+            
+        except Exception as e:
+            print(f"\n❌ ERROR: {e}")
+            print(f"\n📝 Error type: {type(e).__name__}")
+            print("\n💡 Troubleshooting:")
+            print("   1. Check dataset folder exists and has images")
+            print("   2. Verify all packages are installed: pip list")
+            print("   3. Try reducing n_components if memory error")
+            print("   4. Make sure virtual environment is activated")
+            import traceback
+            print("\n📋 Full error trace:")
+            traceback.print_exc()
+            return None
+
+
+# Main execution
+if __name__ == "__main__":
+    print("\n" + "="*60)
+    print("Windows Face Recognition System")
+    print("="*60)
+    
+    # Create instance
+    fr = WindowsFaceRecognition(dataset_path='dataset')
+    
+    # Run pipeline
+    accuracy = fr.run(
+        n_components=100,
+        hidden_layers=(100, 50),
+        test_size=0.2,
+        visualize=True
+    )
+    
+    if accuracy is not None:
+        print(f"\n✅ Success! Accuracy: {accuracy:.2%}")
+        print(f"\n📁 Output files:")
+        print(f"   - predictions.png")
+        print(f"   - eigenfaces.png")
+    else:
+        print("\n❌ Failed! Check errors above.")
+        print("\n💡 Quick fixes:")
+        print("   1. Install missing packages: pip install numpy scikit-learn matplotlib opencv-python")
+        print("   2. Download dataset to 'dataset' folder")
+        print("   3. Run: python check_setup.py")
+    
+    print("\n" + "="*60)
+    input("\nPress Enter to exit...")
